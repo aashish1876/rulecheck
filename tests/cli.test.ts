@@ -33,6 +33,8 @@ describe("built CLI", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Estimated size:");
     expect(result.stdout).toContain("No problems found.");
+    expect(result.stdout).toContain("Penalty breakdown:");
+    expect(result.stdout).toContain("token-cost: 0 errors, 0 warnings, 0 penalty");
     expect(result.stdout).not.toContain("problems (0 errors, 0 warnings)");
   });
 
@@ -55,5 +57,72 @@ describe("built CLI", () => {
     const warningLine = lines.find((line) => line.includes("This repository uses pnpm")) ?? "";
     expect(errorLine.indexOf("Path ")).toBe(warningLine.indexOf("This repository"));
     expect(result.stdout).toContain("\nFound ");
+  });
+
+  it("prints parseable JSON only, including info issues and score fields", () => {
+    const result = spawnSync(process.execPath, [cli, path.join(fixtures, "clean-repo"), "--format", "json"], { encoding: "utf8" });
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    const parsed = JSON.parse(result.stdout) as {
+      version: string; score: number; grade: string;
+      summary: { files: number; rules: number; errors: number; warnings: number; infos: number };
+      files: Array<{ path: string; type: string }>;
+      issues: Array<{ ruleId: string; severity: string; file: string; line: number }>;
+      breakdown: Array<{ ruleId: string; errors: number; warnings: number; penalty: number }>;
+    };
+    expect(parsed).toMatchObject({ version: "0.0.1", score: 100, grade: "Excellent" });
+    expect(parsed.summary).toMatchObject({ files: 1, errors: 0, warnings: 0 });
+    expect(parsed.summary.infos).toBeGreaterThan(0);
+    expect(parsed.files[0]).toMatchObject({ path: "AGENTS.md", type: "agents" });
+    expect(parsed.issues.some((issue) => issue.severity === "info")).toBe(true);
+    expect(Array.isArray(parsed.breakdown)).toBe(true);
+  });
+
+  it("returns JSON with a null score when discovery finds no rules files", () => {
+    const result = spawnSync(process.execPath, [cli, path.join(fixtures, "clean-repo"), "--ignore", "**/*.md", "--format", "json"], { encoding: "utf8" });
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("No rules files found.");
+    expect(JSON.parse(result.stdout)).toMatchObject({ score: null, grade: null, summary: { files: 0 }, files: [], issues: [] });
+  });
+
+  it("uses exit codes 0, 1, and 2 for success, findings, and a bad directory", () => {
+    const clean = spawnSync(process.execPath, [cli, path.join(fixtures, "clean-repo")], { encoding: "utf8" });
+    const stale = spawnSync(process.execPath, [cli, path.join(fixtures, "stale-repo")], { encoding: "utf8" });
+    const missing = spawnSync(process.execPath, [cli, path.join(fixtures, "no-such-repo")], { encoding: "utf8" });
+    expect(clean.status).toBe(0);
+    expect(stale.status).toBe(1);
+    expect(missing.status).toBe(2);
+    expect(missing.stderr).toContain("Not a readable directory");
+    expect(missing.stderr).not.toContain("at file:");
+  });
+
+  it("applies warning and score thresholds", () => {
+    const warnings = spawnSync(process.execPath, [cli, path.resolve("tests/fixtures/dupes-repo"), "--max-warnings", "0"], { encoding: "utf8" });
+    const scoreThreshold = spawnSync(process.execPath, [cli, path.join(fixtures, "stale-repo"), "--min-score", "80"], { encoding: "utf8" });
+    const cleanThreshold = spawnSync(process.execPath, [cli, path.join(fixtures, "clean-repo"), "--min-score", "100"], { encoding: "utf8" });
+    expect(warnings.status).toBe(1);
+    expect(scoreThreshold.status).toBe(1);
+    expect(cleanThreshold.status).toBe(0);
+  });
+
+  it("rejects invalid formats and disables color with --no-color", () => {
+    const invalid = spawnSync(process.execPath, [cli, path.join(fixtures, "clean-repo"), "--format", "yaml"], { encoding: "utf8" });
+    const plain = spawnSync(process.execPath, [cli, path.join(fixtures, "clean-repo"), "--no-color"], {
+      encoding: "utf8", env: { ...process.env, FORCE_COLOR: "1" },
+    });
+    expect(invalid.status).toBe(2);
+    expect(invalid.stderr).toContain("Allowed choices");
+    expect(plain.status).toBe(0);
+    expect(plain.stdout).not.toMatch(/\u001b\[[0-9;]*m/);
+    const noColorEnv = spawnSync(process.execPath, [cli, path.join(fixtures, "clean-repo")], {
+      encoding: "utf8", env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "1" },
+    });
+    expect(noColorEnv.stdout).not.toMatch(/\u001b\[[0-9;]*m/);
+  });
+
+  it("uses singular problem wording for a single finding", () => {
+    const result = spawnSync(process.execPath, [cli, path.resolve("tests/fixtures/prose-repo")], { encoding: "utf8" });
+    expect(result.stdout).toContain("1 problem (1 error, 0 warnings)");
+    expect(result.stdout).toContain("Score: ");
   });
 });
