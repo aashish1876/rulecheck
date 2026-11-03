@@ -1,4 +1,4 @@
-name: "rulecheck"
+name: "Rulecheck Rules Linter"
 description: "Lint AGENTS.md / CLAUDE.md / .cursorrules for stale paths, broken commands, duplicates, and conflicting rules."
 branding:
   icon: "check-circle"
