@@ -1,0 +1,101 @@
+name: "rulecheck"
+description: "Lint AGENTS.md / CLAUDE.md / .cursorrules for stale paths, broken commands, duplicates, and conflicting rules."
+branding:
+  icon: "check-circle"
+  color: "green"
+inputs:
+  path:
+    description: "Directory to inspect, relative to the workspace"
+    required: false
+    default: "."
+  ignore:
+    description: "Comma-separated glob patterns to ignore"
+    required: false
+    default: ""
+  min-score:
+    description: "Minimum score required"
+    required: false
+    default: ""
+  max-warnings:
+    description: "Maximum warnings allowed"
+    required: false
+    default: ""
+  verbose:
+    description: "Include informational findings"
+    required: false
+    default: "false"
+outputs:
+  score:
+    description: "Rulecheck score from 0 to 100, or empty if no rules files were found"
+    value: ${{ steps.result.outputs.score }}
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+
+    - name: Build rulecheck from the action source
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        cd "$ACTION_PATH"
+        npm ci
+        npm run build
+
+    - name: Prepare rulecheck arguments
+      shell: bash
+      env:
+        RULECHECK_PATH: ${{ inputs.path }}
+        RULECHECK_IGNORE: ${{ inputs.ignore }}
+        RULECHECK_MIN_SCORE: ${{ inputs.min-score }}
+        RULECHECK_MAX_WARNINGS: ${{ inputs.max-warnings }}
+        RULECHECK_VERBOSE: ${{ inputs.verbose }}
+        RULECHECK_ARGS_FILE: ${{ runner.temp }}/rulecheck-args
+      run: |
+        node <<'NODE'
+        const fs = require('node:fs');
+        const path = require('node:path');
+        const workspace = process.env.GITHUB_WORKSPACE;
+        const target = path.resolve(workspace, process.env.RULECHECK_PATH || '.');
+        const args = [target];
+        const ignores = (process.env.RULECHECK_IGNORE || '').split(',').map((value) => value.trim()).filter(Boolean);
+        for (const pattern of ignores) args.push('--ignore', pattern);
+        if (process.env.RULECHECK_MIN_SCORE) args.push('--min-score', process.env.RULECHECK_MIN_SCORE);
+        if (process.env.RULECHECK_MAX_WARNINGS) args.push('--max-warnings', process.env.RULECHECK_MAX_WARNINGS);
+        if ((process.env.RULECHECK_VERBOSE || '').toLowerCase() === 'true') args.push('--verbose');
+        fs.writeFileSync(process.env.RULECHECK_ARGS_FILE, `${args.join('\0')}\0`);
+        NODE
+
+    - name: Capture score
+      id: result
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        RULECHECK_ARGS_FILE: ${{ runner.temp }}/rulecheck-args
+        RULECHECK_JSON_FILE: ${{ runner.temp }}/rulecheck-result.json
+      run: |
+        mapfile -d '' -t args < "$RULECHECK_ARGS_FILE"
+        node "$ACTION_PATH/dist/cli.js" "${args[@]}" --format json > "$RULECHECK_JSON_FILE" || true
+        score="$(node -e 'try { const r = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); process.stdout.write(r.score === null ? "" : String(r.score)); } catch { process.stdout.write(""); }' "$RULECHECK_JSON_FILE")"
+        echo "score=$score" >> "$GITHUB_OUTPUT"
+
+    - name: Append Markdown report
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        RULECHECK_ARGS_FILE: ${{ runner.temp }}/rulecheck-args
+      run: |
+        mapfile -d '' -t args < "$RULECHECK_ARGS_FILE"
+        node "$ACTION_PATH/dist/cli.js" "${args[@]}" --format markdown >> "$GITHUB_STEP_SUMMARY" || true
+
+    - name: Emit GitHub annotations
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        RULECHECK_ARGS_FILE: ${{ runner.temp }}/rulecheck-args
+      run: |
+        mapfile -d '' -t args < "$RULECHECK_ARGS_FILE"
+        node "$ACTION_PATH/dist/cli.js" "${args[@]}" --format github
