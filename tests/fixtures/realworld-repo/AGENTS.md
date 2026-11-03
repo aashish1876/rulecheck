@@ -10,3 +10,12 @@ The prose and code samples below are not broken repository paths:
 - `path/to/file.ts`, `vYYYY_MM_DD.py`, and `*.test.tsx` are placeholders or globs.
 - `vercel/next.js` is a GitHub owner/repository slug.
 - `N8N_BASE_URL/api/v1/` is a configuration URL path.
+# More examples that are not missing paths:
+
+- Reference `dev/my_script.py` when it is user-created.
+- The optional service may be under `./pkg/services/myservice/`.
+- The template is `tests/specs/my_feature/` and `site/docs/_partial-some-content.mdx`.
+- The gitignored cache is `dev/registry/.inventory_cache/`.
+- Use `conf/custom.ini` if present; it is a local user configuration file.
+- The runtime settings are stored at `conf/custom.ini`.
+- A scoped package exposes `@n8n/api-types/src/dto/x.ts`.

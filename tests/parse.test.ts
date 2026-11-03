@@ -47,4 +47,9 @@ describe("parseRules", () => {
     }
     expect(parsed.filePaths).toContainEqual(expect.objectContaining({ value: "AGENTS.md", isImport: true }));
   });
+
+  it("maps prose references to their actual line", () => {
+    const parsed = parseRules("Introductory prose begins here\nand mentions @.claude/CLAUDE.md on this line.");
+    expect(parsed.filePaths).toContainEqual(expect.objectContaining({ value: ".claude/CLAUDE.md", line: 2, isImport: true }));
+  });
 });

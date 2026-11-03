@@ -1,7 +1,7 @@
 import path from "node:path";
 import type { Check, Issue, ParsedRulesFile } from "../types.js";
 
-export const tokenThresholds = { warning: 2_000, error: 6_000 } as const;
+export const tokenThresholds = { warning: 5_000 } as const;
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
@@ -9,9 +9,10 @@ function estimateTokens(text: string): number {
 
 function largestSection(file: ParsedRulesFile): { title: string; tokens: number } | undefined {
   const content = file.content ?? "";
-  if (!content || file.headings.length === 0) return undefined;
+  const headings = file.headings.filter((heading) => heading.depth >= 2);
+  if (!content || headings.length === 0) return undefined;
   const lines = content.split("\n");
-  const sections = file.headings.map((heading) => {
+  const sections = headings.map((heading) => {
     const next = file.headings.find((candidate) => candidate.line > heading.line && candidate.depth <= heading.depth);
     const endLine = next?.line ?? lines.length + 1;
     const sectionText = lines.slice(heading.line - 1, endLine - 1).join("\n");
@@ -28,13 +29,10 @@ function fileIssues(file: ParsedRulesFile): Issue[] {
   const content = file.content ?? "";
   const tokens = estimateTokens(content);
   const result = [issue(file.path, 1, "info", `Estimated size: ~${tokens.toLocaleString("en-US")} tokens.`)];
-  if (tokens > tokenThresholds.warning) {
+  if (tokens >= tokenThresholds.warning) {
     const section = largestSection(file);
     const suffix = section ? ` Largest section: "${section.title}" (~${section.tokens.toLocaleString("en-US")} tokens).` : "";
     result.push(issue(file.path, 1, "warning", `Estimated size: ~${tokens.toLocaleString("en-US")} tokens, above ${tokenThresholds.warning.toLocaleString("en-US")} tokens.${suffix}`));
-  }
-  if (tokens > tokenThresholds.error) {
-    result.push(issue(file.path, 1, "error", `Estimated size: ~${tokens.toLocaleString("en-US")} tokens, above ${tokenThresholds.error.toLocaleString("en-US")} tokens.`));
   }
   return result;
 }

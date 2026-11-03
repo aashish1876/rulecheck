@@ -16,6 +16,7 @@ const negativePattern = /\b(?:don't|do not|never|must not|should not|instead of|
 const comparisonPattern = /\b(?:compare|comparison|compared|versus|vs\.?|rather than|over|between\b.*\band)\b/i;
 const positiveBefore = /\b(?:use|run|prefer|always|must)\b[^.!?;]{0,48}$/i;
 const negativeAfter = /^\s*(?:is\s+)?(?:not\b|instead\b|replaced\b)/i;
+const packageManagerNegation = /\b(?:do\s+not|don't|never|avoid)\b/i;
 
 function aliasPattern(alias: string): RegExp {
   const words = alias.split(/\s+/).map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+");
@@ -53,7 +54,19 @@ function scopes(text: string): Map<string, string> {
 }
 
 function commandMember(command: string, group: ToolConflictGroup, member: ToolConflictMember): boolean {
-  const value = command.trim().replace(/^\$\s*/, "");
+  const value = command.trim().replace(/^\$\s*/, "").replace(/^cd\s+.+?\s*&&\s*/i, "");
+  if (group.name === "package managers") {
+    if (/^npx\b/i.test(value)) return false;
+    const [executable, ...parts] = value.split(/\s+/);
+    if (!member.aliases.includes(executable?.toLowerCase() ?? "")) return false;
+    let index = 0;
+    while (parts[index]?.startsWith("-")) {
+      const flag = parts[index];
+      index += 1;
+      if (["--filter", "-F", "--workspace", "-w", "--prefix", "-C", "--cwd", "--dir"].includes(flag ?? "")) index += 1;
+    }
+    return ["install", "add", "ci", "run", "test", "start", "exec", "dlx", "create"].includes(parts[index]?.toLowerCase() ?? "");
+  }
   for (const alias of member.aliases) {
     const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
     const executable = new RegExp(`^(?:${escaped})(?=\\s|$)`, "i");
@@ -68,6 +81,7 @@ function ruleRecommendations(file: ParsedRulesFile, ruleText: string, line: numb
   const found: Recommendation[] = [];
   const scope = scopes(ruleText);
   for (const group of toolConflictGroups) {
+    if (group.name === "package managers") continue;
     const allNames = group.members.filter((member) => memberMatches(ruleText, member).length > 0);
     if (allNames.length > 1 && comparisonPattern.test(ruleText)) continue;
     for (const member of group.members) {
@@ -84,6 +98,7 @@ function commandRecommendations(file: ParsedRulesFile, command: { value: string;
   const rule = file.rules.find((candidate) => candidate.line === command.line);
   const found: Recommendation[] = [];
   for (const group of toolConflictGroups) {
+    if (group.name === "package managers" && packageManagerNegation.test(rule?.text ?? command.value)) continue;
     if (rule) {
       const mentions = group.members.filter((member) => memberMatches(rule.text, member).length > 0);
       if (mentions.length > 1 && comparisonPattern.test(rule.text)) continue;

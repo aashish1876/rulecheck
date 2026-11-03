@@ -2,7 +2,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import fg from "fast-glob";
 import type { Check, Issue, ParsedRulesFile } from "../types.js";
-import { isBuildArtifactPath, isPlaceholder } from "./shared.js";
+import { isBuildArtifactPath, isPlaceholder, isUserCreatedConfigPath } from "./shared.js";
 
 const knownBareFiles = new Set([
   "package.json", "tsconfig.json", "Makefile", "Dockerfile", "README.md", "pyproject.toml",
@@ -15,7 +15,7 @@ function stripRelativePrefixes(value: string): string {
 }
 
 function isSkipped(value: string, ruleText: string, root: string): boolean {
-  if (isPlaceholder(value) || value.startsWith("~/")) return true;
+  if (isPlaceholder(value, ruleText) || value.startsWith("~/")) return true;
   if (path.isAbsolute(value)) {
     const resolved = path.resolve(value);
     const repo = path.resolve(root);
@@ -90,16 +90,16 @@ function closestName(target: string): string | undefined {
 }
 
 function resolveReference(root: string, file: ParsedRulesFile, value: string, line: number, isImport: boolean, entries: Set<string>): Issue | undefined {
-  const ruleText = file.rules.find((rule) => rule.line === line)?.text ?? "";
+  const ruleText = file.content?.split("\n")[line - 1] ?? file.rules.find((rule) => rule.line === line)?.text ?? "";
   if (isSkipped(value, ruleText, root)) return undefined;
 
-  const candidate = stripRelativePrefixes(value).replace(/\/$/, "") || ".";
+  const candidate = value.replace(/\/$/, "") || ".";
   if (!candidate || candidate === ".") return undefined;
-  const bases = [root, path.dirname(file.path)];
+  const rulesDir = path.dirname(file.path);
 
   if (isImport) {
-    const target = path.resolve(path.dirname(file.path), candidate);
-    if (existsWithExactCase(target, path.dirname(file.path))) return undefined;
+    const target = path.resolve(rulesDir, candidate);
+    if (existsWithExactCase(target, root)) return undefined;
     return { ruleId: "stale-path", severity: "error", message: `Path "${value}" does not exist.`, file: file.path, line };
   }
 
@@ -109,19 +109,19 @@ function resolveReference(root: string, file: ParsedRulesFile, value: string, li
     return { ruleId: "stale-path", severity: "error", message: `Path "${value}" does not exist.`, file: file.path, line };
   }
 
-  for (const base of bases) {
-    const target = path.resolve(base, candidate);
-    if (existsWithExactCase(target, base) && (!value.endsWith("/") || isDirectory(target))) return undefined;
+  const targets = [path.resolve(root, candidate), path.resolve(rulesDir, candidate)]
+    .filter((target) => target === root || target.startsWith(`${root}${path.sep}`));
+  for (const target of targets) {
+    if (existsWithExactCase(target, root) && (!value.endsWith("/") || isDirectory(target))) return undefined;
   }
-  if (hasSuffixMatch(entries, candidate)) return undefined;
+  const suffixCandidate = stripRelativePrefixes(candidate);
+  if (hasSuffixMatch(entries, suffixCandidate)) return undefined;
+  if (isUserCreatedConfigPath(candidate)) return undefined;
 
-  const segments = candidate.split("/");
-  if (segments.length < 2) return undefined;
-  const parent = segments.slice(0, -1).join("/");
-  const matchingBase = bases.find((base) => isDirectory(path.resolve(base, parent)) && existsWithExactCase(path.resolve(base, parent), base));
-  if (!matchingBase) return undefined;
-
-  const target = path.resolve(matchingBase, candidate);
+  const parentTargets = targets.map((target) => path.dirname(target));
+  const matchingParent = parentTargets.find((parent) => isDirectory(parent) && existsWithExactCase(parent, root));
+  if (!matchingParent) return undefined;
+  const target = path.join(matchingParent, path.basename(candidate));
   const nearName = closestName(target);
   const actualPath = nearName ? path.relative(root, path.join(path.dirname(target), nearName)).split(path.sep).join("/") : undefined;
   const suggestion = actualPath && value.endsWith("/") ? `${actualPath}/` : actualPath;

@@ -23,7 +23,7 @@ describe("duplicate-rule", () => {
     const issues = duplicateRuleCheck.run({ root: "/repo", files: [file] });
     expect(issues.map(({ severity, message }) => [severity, message])).toEqual([
       ["warning", "Duplicate of rule at AGENTS.md:1"],
-      ["warning", "Near-duplicate of rule at AGENTS.md:1"],
+      ["info", "Near-duplicate of rule at AGENTS.md:1"],
     ]);
   });
 
@@ -61,7 +61,7 @@ describe("duplicate-rule", () => {
         ],
       });
       expect(issues).toHaveLength(1);
-      expect(issues[0]).toMatchObject({ severity: "info", file: claudePath, message: "CLAUDE.md is identical to AGENTS.md" });
+      expect(issues[0]).toMatchObject({ severity: "info", file: claudePath, message: "Identical to AGENTS.md" });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -73,5 +73,16 @@ describe("duplicate-rule", () => {
       parsedFile("/repo/packages/app/CLAUDE.md", [{ text: "Keep function and variable names descriptive throughout the codebase.", line: 1, parentHeading: null }]),
     ];
     expect(duplicateRuleCheck.run({ root: "/repo", files })).toEqual([]);
+  });
+
+  it("keeps near-duplicates informational and requires six words for exact warnings", () => {
+    const file = parsedFile("/repo/AGENTS.md", [
+      { text: "Always keep every public service name clear for all callers today.", line: 1, parentHeading: null },
+      { text: "Always keep every public service name clear for all callers tomorrow.", line: 2, parentHeading: null },
+      { text: "Write useful tests for every changed module now.", line: 3, parentHeading: null },
+      { text: "Write useful tests for every changed module now.", line: 4, parentHeading: null },
+    ]);
+    const issues = duplicateRuleCheck.run({ root: "/repo", files: [file] });
+    expect(issues.map((issue) => issue.severity)).toEqual(["info", "warning"]);
   });
 });

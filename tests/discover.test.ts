@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { discoverRulesFiles } from "../src/discover.js";
@@ -32,6 +32,18 @@ describe("discoverRulesFiles", () => {
     const files = await discoverRulesFiles(root, ["packages/**"]);
     expect(files.map((file) => path.relative(root, file.path))).not.toContain("packages/app/CLAUDE.md");
     expect(files.map((file) => path.relative(root, file.path))).toContain("AGENTS.md");
+  });
+
+  it("drops discovered symlink aliases of other rules files", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "rulecheck-symlink-"));
+    try {
+      writeFileSync(path.join(root, "AGENTS.md"), "# Rules\n");
+      symlinkSync("AGENTS.md", path.join(root, "CLAUDE.md"));
+      const files = await discoverRulesFiles(root);
+      expect(files.map((file) => path.basename(file.path))).toEqual(["AGENTS.md"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("skips unreadable directories while finding root rules files", async () => {

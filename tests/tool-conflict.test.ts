@@ -78,9 +78,9 @@ describe("tool-conflict", () => {
 
   it("reports cross-file conflicts only between root-level rules files", () => {
     const root = "/repo";
-    const agents = file(root, "AGENTS.md", "- Always use pnpm for packages.");
-    const claude = file(root, "CLAUDE.md", "- Prefer npm for packages.");
-    const nested = file(root, "packages/app/AGENTS.md", "- Prefer npm for packages.");
+    const agents = file(root, "AGENTS.md", "- Run `pnpm install` for packages.");
+    const claude = file(root, "CLAUDE.md", "- Run `npm install` for packages.");
+    const nested = file(root, "packages/app/AGENTS.md", "- Run `npm install` for packages.");
     expect(conflicts(root, [agents, claude])).toHaveLength(1);
     expect(conflicts(root, [agents, nested])).toEqual([]);
   });
@@ -118,5 +118,16 @@ describe("tool-conflict", () => {
     ].join("\n"));
     expect(conflicts(root, [differentLanguages])).toEqual([]);
     expect(conflicts(root, [sameLanguagePotential])).toHaveLength(1);
+  });
+
+  it("counts only package-manager install or run commands and skips negated rules", () => {
+    const root = "/repo";
+    const parsed = file(root, "AGENTS.md", [
+      "- Do NOT run `pnpm add` for this operation.",
+      "- Check `npm view <package> time --json` for release metadata.",
+      "- Do not run `pnpm install`; use `npm install` only for validation.",
+      "- `npx npm install` is an example command.",
+    ].join("\n"));
+    expect(conflicts(root, [parsed])).toEqual([]);
   });
 });

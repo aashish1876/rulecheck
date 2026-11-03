@@ -37,7 +37,9 @@ export function parseRules(markdown: string, _options: { root?: string; filePath
   const addPath = (value: string, line: number, inCode: boolean): void => {
     if (!value || /\s/.test(value) || value.startsWith("//") || value.includes(":") || urlPattern.test(value)) return;
     if (numericRatio.test(value) || versionPair.test(value) || commonAbbreviation.test(value)) return;
-    const isImport = value.startsWith("@") && !value.startsWith("@/");
+    const slashes = [...value].filter((character) => character === "/").length;
+    const scopedPath = value.startsWith("@") && slashes >= 2 && !value.startsWith("@./") && !value.startsWith("@../");
+    const isImport = value.startsWith("@") && !scopedPath;
     if (isImport) value = value.slice(1);
     const lastSegment = value.replace(/\/$/, "").split("/").at(-1) ?? "";
     const extension = pathExtension.exec(lastSegment)?.[1]?.toLowerCase();
@@ -49,7 +51,8 @@ export function parseRules(markdown: string, _options: { root?: string; filePath
     const withoutUrls = value.replace(/https?:\/\/\S+/gi, " ");
     for (const match of withoutUrls.matchAll(pathPattern)) {
       const candidate = match[0].replace(/[.,;:!?]+$/, "");
-      if (candidate) addPath(candidate, line, inCode);
+      const matchLine = line + withoutUrls.slice(0, match.index ?? 0).split("\n").length - 1;
+      if (candidate) addPath(candidate, matchLine, inCode);
     }
   };
 

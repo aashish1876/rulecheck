@@ -1,7 +1,7 @@
 # Tool choices
 
-- Always use pnpm for package scripts.
-- Use npm for running the complete test suite.
+- Run `pnpm install` for package scripts.
+- Run `npm install` for the complete test suite.
 - Prefer yarn for installing dependencies.
 - Run jest for JavaScript unit tests.
 - Use vitest for the project test suite.

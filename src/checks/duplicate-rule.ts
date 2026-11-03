@@ -75,7 +75,7 @@ function ruleIssue(root: string, later: LocatedRule, earlier: LocatedRule, sameF
   if (!exact && similarity(later.tokens, earlier.tokens) < 0.8) return undefined;
   return {
     ruleId: "duplicate-rule",
-    severity: sameFile ? "warning" : "info",
+    severity: sameFile && exact && later.tokens.size >= 6 ? "warning" : "info",
     message: `${exact ? "Duplicate" : "Near-duplicate"} of rule at ${location(root, earlier.file.path, earlier.rule.line)}`,
     file: later.file.path,
     line: later.rule.line,
@@ -95,21 +95,22 @@ export const duplicateRuleCheck: Check = {
     for (let laterIndex = 1; laterIndex < files.length; laterIndex += 1) {
       const later = files[laterIndex];
       if (!later) continue;
+      let firstIdentical: ParsedRulesFile | undefined;
       for (let earlierIndex = 0; earlierIndex < laterIndex; earlierIndex += 1) {
         const earlier = files[earlierIndex];
-        if (!earlier || !sameDirectory(earlier, later)) continue;
+        if (!earlier) continue;
         const laterContent = contentKeys.get(later);
         if (laterContent === undefined || laterContent !== contentKeys.get(earlier)) continue;
         const pair = `${earlierIndex}:${laterIndex}`;
         identicalPairs.add(pair);
-        if (!identicalPairs.has(`reported:${laterIndex}`)) {
-          issues.push({
-            ruleId: "duplicate-rule", severity: "info",
-            message: `${path.basename(later.path)} is identical to ${path.basename(earlier.path)}`,
-            file: later.path, line: 1,
-          });
-          identicalPairs.add(`reported:${laterIndex}`);
-        }
+        firstIdentical ??= earlier;
+      }
+      if (firstIdentical) {
+        issues.push({
+          ruleId: "duplicate-rule", severity: "info",
+          message: `Identical to ${location(ctx.root, firstIdentical.path, 1).replace(/:1$/, "")}`,
+          file: later.path, line: 1,
+        });
       }
     }
 

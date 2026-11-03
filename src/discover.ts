@@ -1,5 +1,6 @@
 import fg from "fast-glob";
 import path from "node:path";
+import { lstatSync, realpathSync } from "node:fs";
 import type { DiscoveredRulesFile, RulesFileType } from "./types.js";
 
 const patterns: Array<{ pattern: string; type: RulesFileType }> = [
@@ -30,5 +31,17 @@ export async function discoverRulesFiles(root: string, ignore: string[] = []): P
 
   const unique = new Map<string, DiscoveredRulesFile>();
   for (const file of found.flat()) unique.set(file.path, file);
-  return [...unique.values()].sort((a, b) => a.path.localeCompare(b.path));
+  const discovered = [...unique.values()].sort((a, b) => a.path.localeCompare(b.path));
+  const discoveredRealPaths = new Set(discovered.flatMap((file) => {
+    try { return lstatSync(file.path).isSymbolicLink() ? [] : [realpathSync(file.path)]; }
+    catch { return [path.resolve(file.path)]; }
+  }));
+  return discovered.filter((file) => {
+    try {
+      if (!lstatSync(file.path).isSymbolicLink()) return true;
+      return !discoveredRealPaths.has(realpathSync(file.path));
+    } catch {
+      return true;
+    }
+  });
 }
