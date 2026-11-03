@@ -13,6 +13,7 @@ describe("built CLI", () => {
     expect(result.status).toBe(1);
     expect(result.stdout).toContain("stale-path");
     expect(result.stdout).toContain("stale-command");
+    expect(result.stdout).toContain("Score: 50/100 (Needs work)");
   });
 
   it("reports a clean fixture and exits successfully", () => {
@@ -78,6 +79,19 @@ describe("built CLI", () => {
     expect(parsed.files[0]).toMatchObject({ path: "AGENTS.md", type: "agents" });
     expect(parsed.issues.some((issue) => issue.severity === "info")).toBe(true);
     expect(Array.isArray(parsed.breakdown)).toBe(true);
+  });
+
+  it("keeps same-line findings in JSON while counting only one for the score", () => {
+    const result = spawnSync(process.execPath, [cli, path.join(fixtures, "stale-repo"), "--format", "json"], { encoding: "utf8" });
+    const parsed = JSON.parse(result.stdout) as {
+      score: number;
+      summary: { errors: number; warnings: number; infos: number };
+      issues: unknown[];
+    };
+    expect(result.status).toBe(1);
+    expect(parsed.score).toBe(50);
+    expect(parsed.issues).toHaveLength(parsed.summary.errors + parsed.summary.warnings + parsed.summary.infos);
+    expect(parsed.issues.length).toBeGreaterThan(parsed.summary.errors + parsed.summary.warnings);
   });
 
   it("returns JSON with a null score when discovery finds no rules files", () => {

@@ -95,6 +95,16 @@ describe("built-in checks", () => {
     expect(runChecks({ root, files }).filter((issue) => issue.ruleId === "stale-path")).toEqual([]);
   });
 
+  it("skips gitignored imports but still reports a real missing path", () => {
+    const root = path.join(fixtures, "realworld-repo");
+    const filePath = path.join(root, "CLAUDE.md");
+    const content = readFileSync(filePath, "utf8");
+    const file: ParsedRulesFile = { path: filePath, type: "claude", ...parseRules(content), content };
+    const issues = runChecks({ root, files: [file] }).filter((issue) => issue.ruleId === "stale-path");
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ line: 2, message: 'Path "broken/missing.ts" does not exist.' });
+  });
+
   it("estimates token cost, reports the largest section, and totals root files", () => {
     const root = path.join(fixtures, "clean-repo");
     const content = `# Guide\n## Small\n${"a".repeat(20)}\n\n## Largest\n${"b".repeat(24_100)}`;

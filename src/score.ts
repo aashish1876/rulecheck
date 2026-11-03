@@ -1,4 +1,5 @@
 import type { Issue } from "./types.js";
+import path from "node:path";
 
 export const scoreConfig = {
   errorPenalty: 10,
@@ -32,8 +33,18 @@ export function gradeForScore(value: number): string {
 
 export function score(issues: Issue[], stats: ScoreStats): ScoreResult | null {
   if (stats.files === 0) return null;
-  const totals = new Map<string, { errors: number; warnings: number }>();
+  const severityRank = { info: 0, warning: 1, error: 2 } as const;
+  const worstByLocation = new Map<string, Issue>();
   for (const issue of issues) {
+    const key = `${path.normalize(issue.file)}\0${issue.line}`;
+    const current = worstByLocation.get(key);
+    if (!current || severityRank[issue.severity] > severityRank[current.severity]
+      || (severityRank[issue.severity] === severityRank[current.severity] && issue.ruleId.localeCompare(current.ruleId) < 0)) {
+      worstByLocation.set(key, issue);
+    }
+  }
+  const totals = new Map<string, { errors: number; warnings: number }>();
+  for (const issue of worstByLocation.values()) {
     const entry = totals.get(issue.ruleId) ?? { errors: 0, warnings: 0 };
     if (issue.severity === "error") entry.errors += 1;
     if (issue.severity === "warning") entry.warnings += 1;

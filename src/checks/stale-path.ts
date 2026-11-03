@@ -2,7 +2,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import fg from "fast-glob";
 import type { Check, Issue, ParsedRulesFile } from "../types.js";
-import { isBuildArtifactPath, isPlaceholder, isUserCreatedConfigPath } from "./shared.js";
+import { isBuildArtifactPath, isGitignoredPath, isPlaceholder, isUserCreatedConfigPath } from "./shared.js";
 
 const knownBareFiles = new Set([
   "package.json", "tsconfig.json", "Makefile", "Dockerfile", "README.md", "pyproject.toml",
@@ -99,6 +99,7 @@ function resolveReference(root: string, file: ParsedRulesFile, value: string, li
 
   if (isImport) {
     const target = path.resolve(rulesDir, candidate);
+    if (isGitignoredPath(root, rulesDir, [target])) return undefined;
     if (existsWithExactCase(target, root)) return undefined;
     return { ruleId: "stale-path", severity: "error", message: `Path "${value}" does not exist.`, file: file.path, line };
   }
@@ -111,6 +112,7 @@ function resolveReference(root: string, file: ParsedRulesFile, value: string, li
 
   const targets = [path.resolve(root, candidate), path.resolve(rulesDir, candidate)]
     .filter((target) => target === root || target.startsWith(`${root}${path.sep}`));
+  if (isGitignoredPath(root, rulesDir, targets)) return undefined;
   for (const target of targets) {
     if (existsWithExactCase(target, root) && (!value.endsWith("/") || isDirectory(target))) return undefined;
   }
