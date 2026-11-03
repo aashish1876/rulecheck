@@ -1,0 +1,30 @@
+# Setup
+
+- Read `src/ok.ts` and `package.json` before making changes.
+- Read `src/utlis/` for the helper API.
+- Read `src/missing.ts` after it is generated.
+- The generated files are in `dist/missing.js` and `coverage/report.html`.
+- The source path is `<source-dir>/index.ts` and the script is `$BUILD_TASK`.
+- For templates, use `{name}/index.ts` and `[folder]/entry.ts`.
+- Template inputs may be `<filename>`, `path/to/...`, `$VAR`, or `${BUILD_DIR}`.
+- The local editor config may be at `~/Library/Config/rules.md`.
+- An external tool may mention `/opt/tools/guide.md`.
+- The docs live at https://example.com/docs.
+- Run `npm run build`.
+- Run `npm run test:unitt`.
+- Run `npm test`.
+- Run `npm start` and `npm t`.
+- Run `pnpm run not-found` and `pnpm not-found`.
+- Run `yarn run not-found` and `yarn not-found`.
+- Run `bun run not-found` and `bun not-found`.
+- Run `make build`.
+- Run `make release`.
+- Run `node scripts/check.js`.
+- Run `node scripts/missing.js`.
+- Run `python scripts/check.py`.
+- Run `python3 scripts/missing.py`.
+- Run `bash scripts/missing.sh` and `sh scripts/missing.sh`.
+- Run `./scripts/missing.sh`.
+- Run `pytest` when working on Python code.
+- For new output, create `src/new-output/`.
+- Find all markdown with `docs/**/*.md`.

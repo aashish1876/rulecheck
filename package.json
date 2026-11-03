@@ -1,0 +1,27 @@
+{
+  "name": "rulecheck",
+  "version": "0.0.1",
+  "description": "Lint AI agent rules files for quality and consistency",
+  "type": "module",
+  "bin": { "rulecheck": "dist/cli.js" },
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "lint": "tsc --noEmit",
+    "selfcheck": "npm run build && node dist/cli.js . --ignore 'tests/fixtures/**'"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "fast-glob": "^3.3.2",
+    "mdast-util-from-markdown": "^2.0.2",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
