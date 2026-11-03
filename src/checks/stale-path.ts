@@ -137,6 +137,7 @@ export const stalePathCheck: Check = {
       cwd: root,
       onlyFiles: true,
       dot: true,
+      suppressErrors: true,
       ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/build/**"],
     });
     const repoFiles = new Set(paths.map((item) => path.basename(item)));

@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { discoverRulesFiles } from "../src/discover.js";
 
@@ -30,5 +32,20 @@ describe("discoverRulesFiles", () => {
     const files = await discoverRulesFiles(root, ["packages/**"]);
     expect(files.map((file) => path.relative(root, file.path))).not.toContain("packages/app/CLAUDE.md");
     expect(files.map((file) => path.relative(root, file.path))).toContain("AGENTS.md");
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("skips unreadable directories while finding root rules files", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "rulecheck-discovery-"));
+    const unreadable = path.join(root, "unreadable");
+    mkdirSync(unreadable);
+    writeFileSync(path.join(root, "AGENTS.md"), "# Rules\n");
+    chmodSync(unreadable, 0);
+    try {
+      const files = await discoverRulesFiles(root);
+      expect(files.map((file) => path.basename(file.path))).toContain("AGENTS.md");
+    } finally {
+      chmodSync(unreadable, 0o700);
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseRules } from "../src/parse.js";
 import { runChecks } from "../src/checks/index.js";
@@ -96,16 +97,18 @@ describe("built-in checks", () => {
   });
 
   it("drops identical issues from different checks", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "rulecheck-"));
     const check = {
       id: "test-duplicate", description: "test duplicate", run: () => [{
-        ruleId: "same", severity: "error" as const, message: "same issue", file: "/tmp/rules.md", line: 3,
+        ruleId: "same", severity: "error" as const, message: "same issue", file: path.join(root, "rules.md"), line: 3,
       }],
     };
     checks.push(check);
     try {
-      expect(runChecks({ root: "/tmp", files: [] }).filter((issue) => issue.ruleId === "same")).toHaveLength(1);
+      expect(runChecks({ root, files: [] }).filter((issue) => issue.ruleId === "same")).toHaveLength(1);
     } finally {
       checks.pop();
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

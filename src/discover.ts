@@ -21,6 +21,7 @@ export async function discoverRulesFiles(root: string, ignore: string[] = []): P
         cwd: root,
         onlyFiles: true,
         dot: true,
+        suppressErrors: true,
         ignore: [...defaultIgnores, ...ignore],
       });
       return paths.map((file) => ({ path: path.resolve(root, file), type }));
