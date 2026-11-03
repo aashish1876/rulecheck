@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 const cli = path.resolve("dist/cli.js");
@@ -124,5 +126,43 @@ describe("built CLI", () => {
     const result = spawnSync(process.execPath, [cli, path.resolve("tests/fixtures/prose-repo")], { encoding: "utf8" });
     expect(result.stdout).toContain("1 problem (1 error, 0 warnings)");
     expect(result.stdout).toContain("Score: ");
+  });
+
+  it("prints GitHub annotations and gates info notices on --verbose", () => {
+    const stale = spawnSync(process.execPath, [cli, path.join(fixtures, "stale-repo"), "--format", "github"], { encoding: "utf8" });
+    const clean = spawnSync(process.execPath, [cli, path.join(fixtures, "clean-repo"), "--format", "github"], { encoding: "utf8" });
+    const verbose = spawnSync(process.execPath, [cli, path.join(fixtures, "clean-repo"), "--format", "github", "--verbose"], { encoding: "utf8" });
+    expect(stale.stdout).toContain('::error file=AGENTS.md,line=4,title=stale-path::Path "src/utlis/" does not exist');
+    expect(stale.stdout).toContain("::warning file=AGENTS.md");
+    expect(stale.stdout).toContain("Score: ");
+    expect(clean.stdout).not.toContain("::notice");
+    expect(verbose.stdout).toContain("::notice");
+  });
+
+  it("prints a Markdown report with marker and score", () => {
+    const result = spawnSync(process.execPath, [cli, path.join(fixtures, "stale-repo"), "--format", "markdown"], { encoding: "utf8" });
+    expect(result.stdout.split("\n")[0]).toBe("<!-- rulecheck-report -->");
+    expect(result.stdout).toContain("## rulecheck:");
+    expect(result.stdout).toContain("| File | Line | Severity | Rule | Message |");
+    expect(result.stderr).toBe("");
+  });
+
+  it("writes a badge SVG and handles no rules files without writing", () => {
+    const temp = mkdtempSync(path.join(tmpdir(), "rulecheck-badge-"));
+    const output = path.join(temp, "badge.svg");
+    const none = path.join(temp, "no-rules.svg");
+    try {
+      const badge = spawnSync(process.execPath, [cli, "badge", path.join(fixtures, "clean-repo"), "--out", output], { encoding: "utf8" });
+      expect(badge.status).toBe(0);
+      expect(badge.stdout).toContain("![rulecheck](");
+      expect(readFileSync(output, "utf8")).toContain("<svg");
+
+      const empty = spawnSync(process.execPath, [cli, "badge", path.join(fixtures, "clean-repo"), "--ignore", "**/*.md", "--out", none], { encoding: "utf8" });
+      expect(empty.status).toBe(0);
+      expect(empty.stdout).toContain("No rules files found.");
+      expect(existsSync(none)).toBe(false);
+    } finally {
+      rmSync(temp, { recursive: true, force: true });
+    }
   });
 });

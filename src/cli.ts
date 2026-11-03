@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 import { Command, CommanderError, InvalidArgumentError, Option } from "commander";
 import pc from "picocolors";
-import { access, readFile, stat } from "node:fs/promises";
+import { access, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { discoverRulesFiles } from "./discover.js";
 import { parseRules } from "./parse.js";
 import { runChecks } from "./checks/index.js";
 import { score } from "./score.js";
+import { formatGithub } from "./format/github.js";
+import { formatMarkdown } from "./format/markdown.js";
+import { badgeSvg } from "./badge.js";
 import type { Issue, ParsedRulesFile } from "./types.js";
 
-type OutputFormat = "text" | "json";
+type OutputFormat = "text" | "json" | "github" | "markdown";
 
 interface CliOptions {
   ignore: string[];
@@ -130,13 +133,20 @@ function printJson(root: string, version: string, files: ParsedRulesFile[], issu
   process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
 }
 
-async function run(dir: string, options: CliOptions): Promise<void> {
+interface Analysis {
+  root: string;
+  files: ParsedRulesFile[];
+  issues: Issue[];
+  result: ReturnType<typeof score>;
+}
+
+async function analyze(dir: string, ignore: string[]): Promise<Analysis> {
   const root = path.resolve(dir);
   const directory = await stat(root).catch(() => undefined);
   if (!directory?.isDirectory()) throw new Error(`Not a readable directory: ${dir}`);
   await access(root, 4).catch(() => { throw new Error(`Not a readable directory: ${dir}`); });
 
-  const discovered = await discoverRulesFiles(root, options.ignore);
+  const discovered = await discoverRulesFiles(root, ignore);
   const parsedFiles: ParsedRulesFile[] = [];
   for (const file of discovered) {
     let content: string;
@@ -152,18 +162,55 @@ async function run(dir: string, options: CliOptions): Promise<void> {
 
   const issues = runChecks({ root, files: parsedFiles });
   const result = score(issues, { files: parsedFiles.length });
-  if (options.format === "json") {
-    if (parsedFiles.length === 0) process.stderr.write("No rules files found.\n");
-    const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
-    printJson(root, packageJson.version, parsedFiles, issues, result);
-  } else {
-    printText(root, parsedFiles, issues, result, options, options.color !== false && !process.env.NO_COLOR);
-  }
+  return { root, files: parsedFiles, issues, result };
+}
 
+function updateExitCode(issues: Issue[], result: ReturnType<typeof score>, options: Pick<CliOptions, "maxWarnings" | "minScore">): void {
   const counts = issueCounts(issues);
   const maxWarningsFailed = options.maxWarnings !== undefined && counts.warnings > options.maxWarnings;
   const minScoreFailed = options.minScore !== undefined && (result === null || result.score < options.minScore);
   if (counts.errors > 0 || maxWarningsFailed || minScoreFailed) process.exitCode = 1;
+}
+
+async function packageVersion(): Promise<string> {
+  const json = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+  return json.version;
+}
+
+async function run(dir: string, options: CliOptions): Promise<void> {
+  const { root, files, issues, result } = await analyze(dir, options.ignore);
+  if (options.format === "json") {
+    if (files.length === 0) process.stderr.write("No rules files found.\n");
+    printJson(root, await packageVersion(), files, issues, result);
+  } else if (options.format === "github") {
+    process.stdout.write(`${formatGithub(root, issues, result, Boolean(options.verbose))}\n`);
+  } else if (options.format === "markdown") {
+    process.stdout.write(`${formatMarkdown(root, files, issues, result, Boolean(options.verbose))}\n`);
+  } else {
+    printText(root, files, issues, result, options, options.color !== false && !process.env.NO_COLOR);
+  }
+  updateExitCode(issues, result, options);
+}
+
+interface BadgeOptions {
+  ignore: string[];
+  out: string;
+  maxWarnings?: number;
+  minScore?: number;
+}
+
+async function runBadge(dir: string, options: BadgeOptions): Promise<void> {
+  const { root, files, issues, result } = await analyze(dir, options.ignore);
+  if (result === null) {
+    console.log("No rules files found.");
+    return;
+  }
+  const outPath = path.resolve(options.out);
+  await writeFile(outPath, badgeSvg(result.score), "utf8");
+  const relative = path.relative(process.cwd(), outPath);
+  const snippetPath = relative.startsWith("..") ? outPath : `./${relative}`;
+  console.log(`![rulecheck](${snippetPath})`);
+  updateExitCode(issues, result, options);
 }
 
 const program = new Command();
@@ -174,13 +221,31 @@ program
   .argument("[dir]", "directory to inspect", ".")
   .option("--ignore <glob>", "exclude matching paths (repeatable)", collectIgnore, [])
   .option("--verbose", "show informational findings and score breakdown")
-  .addOption(new Option("--format <format>", "output format").choices(["text", "json"]).default("text"))
+  .addOption(new Option("--format <format>", "output format").choices(["text", "json", "github", "markdown"]).default("text"))
   .option("--max-warnings <n>", "maximum warnings allowed", (value: string) => parseInteger(value, "--max-warnings"))
   .option("--min-score <n>", "minimum score required (0-100)", (value: string) => parseInteger(value, "--min-score", 100))
   .option("--no-color", "disable colored output")
   .configureOutput({ writeErr: (message) => process.stderr.write(message) })
   .exitOverride()
   .action(async (dir: string, options: CliOptions) => run(dir, options));
+
+program
+  .command("badge")
+  .description("Generate a score badge SVG")
+  .argument("[dir]", "directory to inspect", ".")
+  .option("--ignore <glob>", "exclude matching paths (repeatable)", collectIgnore, [])
+  .option("--out <file>", "badge SVG output path", "./rulecheck-badge.svg")
+  .option("--max-warnings <n>", "maximum warnings allowed", (value: string) => parseInteger(value, "--max-warnings"))
+  .option("--min-score <n>", "minimum score required (0-100)", (value: string) => parseInteger(value, "--min-score", 100))
+  .action(async (dir: string, options: BadgeOptions, command: Command) => {
+    const parentOptions = command.parent?.opts() as Partial<BadgeOptions> | undefined;
+    await runBadge(dir, {
+      ...options,
+      ignore: [...(parentOptions?.ignore ?? []), ...options.ignore],
+      maxWarnings: options.maxWarnings ?? parentOptions?.maxWarnings,
+      minScore: options.minScore ?? parentOptions?.minScore,
+    });
+  });
 
 try {
   await program.parseAsync(process.argv);
