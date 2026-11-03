@@ -8,6 +8,8 @@ interface Recommendation {
   member: ToolConflictMember;
   line: number;
   scope: Map<string, string>;
+  ruleText: string;
+  mentionStart: number;
 }
 
 const negativePattern = /\b(?:don't|do not|never|must not|should not|instead of|not|migrated from|replaces?|replacing|replaced)\b/i;
@@ -71,7 +73,7 @@ function ruleRecommendations(file: ParsedRulesFile, ruleText: string, line: numb
     for (const member of group.members) {
       for (const match of memberMatches(ruleText, member)) {
         if (isNegated(ruleText, match.start, match.end) || !isPositive(ruleText, match.start)) continue;
-        found.push({ file, group, member, line, scope });
+        found.push({ file, group, member, line, scope, ruleText, mentionStart: match.start });
       }
     }
   }
@@ -88,7 +90,8 @@ function commandRecommendations(file: ParsedRulesFile, command: { value: string;
     }
     for (const member of group.members) {
       if (commandMember(command.value, group, member)) {
-        found.push({ file, group, member, line: command.line, scope: rule ? scopes(rule.text) : new Map() });
+        const aliasIndex = member.aliases.map((alias) => command.value.toLowerCase().indexOf(alias.toLowerCase())).find((index) => index >= 0) ?? 0;
+        found.push({ file, group, member, line: command.line, scope: rule ? scopes(rule.text) : new Map(), ruleText: rule?.text ?? command.value, mentionStart: aliasIndex });
       }
     }
   }
@@ -113,6 +116,27 @@ function incompatibleScopes(left: Map<string, string>, right: Map<string, string
     if (other && other !== value) return true;
   }
   return false;
+}
+
+function formatterLanguage(recommendation: Recommendation): "python" | "javascript" | undefined {
+  const context = recommendation.ruleText.slice(Math.max(0, recommendation.mentionStart - 50), recommendation.mentionStart + 60);
+  if (/\bpython\b|\.py\b/i.test(context)) return "python";
+  if (/\b(?:javascript|js|typescript|ts)\b|\.(?:tsx?|jsx?)\b/i.test(context)) return "javascript";
+  if (recommendation.member.name === "black") return "python";
+  if (recommendation.member.name === "prettier" || recommendation.member.name === "biome") return "javascript";
+  return undefined;
+}
+
+function hasExplicitFormatterScope(text: string): boolean {
+  return /\.[A-Za-z0-9]{1,5}\b|\b(?:python|javascript|typescript|\bjs\b|\bts\b|folder|directory|frontend|backend|client|server|web|api)\b|(?:^|\s)(?:src|tests?|packages|apps)\/[\w./-]+/i.test(text);
+}
+
+function formatterConflictAllowed(earlier: Recommendation, later: Recommendation): boolean {
+  if (earlier.group.name !== "formatters") return true;
+  if (hasExplicitFormatterScope(earlier.ruleText) || hasExplicitFormatterScope(later.ruleText)) return false;
+  const earlierLanguage = formatterLanguage(earlier);
+  const laterLanguage = formatterLanguage(later);
+  return !earlierLanguage || !laterLanguage || earlierLanguage === laterLanguage;
 }
 
 function location(root: string, recommendation: Recommendation): string {
@@ -144,6 +168,7 @@ function conflicts(root: string, files: ParsedRulesFile[]): Issue[] {
       const earlier = recommendations[earlierIndex];
       if (!earlier || earlier.group.name !== later.group.name || earlier.member.name === later.member.name) continue;
       if (!sameScope(root, earlier, later)) continue;
+      if (!formatterConflictAllowed(earlier, later)) continue;
       issues.push({
         ruleId: "tool-conflict",
         severity: "warning",

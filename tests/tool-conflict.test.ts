@@ -105,4 +105,18 @@ describe("tool-conflict", () => {
       'Rules recommend both "single quotes" (AGENTS.md:7) and "double quotes" (AGENTS.md:8).',
     ]);
   });
+
+  it("skips formatters explicitly scoped to different languages but reports overlapping formatters", () => {
+    const root = "/repo";
+    const differentLanguages = file(root, "AGENTS.md", [
+      "- Always use black for Python files.",
+      "- Prefer prettier for TypeScript files.",
+    ].join("\n"));
+    const sameLanguagePotential = file(root, "CLAUDE.md", [
+      "- Always use prettier consistently.",
+      "- Always use biome consistently.",
+    ].join("\n"));
+    expect(conflicts(root, [differentLanguages])).toEqual([]);
+    expect(conflicts(root, [sameLanguagePotential])).toHaveLength(1);
+  });
 });

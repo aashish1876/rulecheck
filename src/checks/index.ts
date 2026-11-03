@@ -5,8 +5,9 @@ import { stalePathCheck } from "./stale-path.js";
 import { duplicateRuleCheck } from "./duplicate-rule.js";
 import { tokenCostCheck } from "./token-cost.js";
 import { toolConflictCheck } from "./tool-conflict.js";
+import { opposedDirectiveCheck } from "./opposed-directive.js";
 
-export const checks: Check[] = [stalePathCheck, staleCommandCheck, duplicateRuleCheck, tokenCostCheck, toolConflictCheck];
+export const checks: Check[] = [stalePathCheck, staleCommandCheck, duplicateRuleCheck, tokenCostCheck, toolConflictCheck, opposedDirectiveCheck];
 
 export function runChecks(ctx: CheckContext): Issue[] {
   const issues = checks
