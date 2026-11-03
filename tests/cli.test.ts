@@ -73,7 +73,7 @@ describe("built CLI", () => {
       issues: Array<{ ruleId: string; severity: string; file: string; line: number }>;
       breakdown: Array<{ ruleId: string; errors: number; warnings: number; penalty: number }>;
     };
-    expect(parsed).toMatchObject({ version: "0.0.1", score: 100, grade: "Excellent" });
+    expect(parsed).toMatchObject({ version: JSON.parse(readFileSync(path.resolve("package.json"), "utf8")).version, score: 100, grade: "Excellent" });
     expect(parsed.summary).toMatchObject({ files: 1, errors: 0, warnings: 0 });
     expect(parsed.summary.infos).toBeGreaterThan(0);
     expect(parsed.files[0]).toMatchObject({ path: "AGENTS.md", type: "agents" });

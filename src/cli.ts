@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createRequire } from "node:module";
 import { Command, CommanderError, InvalidArgumentError, Option } from "commander";
 import pc from "picocolors";
 import { access, readFile, stat, writeFile } from "node:fs/promises";
@@ -217,7 +218,7 @@ const program = new Command();
 program
   .name("rulecheck")
   .description("Inspect AI agent rules files")
-  .version("0.0.1")
+  .version((createRequire(import.meta.url)("../package.json") as { version: string }).version)
   .argument("[dir]", "directory to inspect", ".")
   .option("--ignore <glob>", "exclude matching paths (repeatable)", collectIgnore, [])
   .option("--verbose", "show informational findings and score breakdown")
