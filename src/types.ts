@@ -25,6 +25,7 @@ export interface Rule {
 export interface Reference {
   value: string;
   line: number;
+  isImport?: boolean;
 }
 
 export interface ParsedRules {

@@ -57,11 +57,11 @@ describe("built-in checks", () => {
     const root = path.join(fixtures, "clean-repo");
     const file: ParsedRulesFile = {
       path: path.join(root, "AGENTS.md"), type: "agents", headings: [], rules: [], commands: [],
-      filePaths: [{ value: "ok.ts", line: 1 }, { value: "missing.ts", line: 2 }],
+      filePaths: [{ value: "ok.ts", line: 1 }, { value: "Dockerfile", line: 2 }],
     };
     const issues = runChecks({ root, files: [file] }).filter((issue) => issue.ruleId === "stale-path");
     expect(issues).toHaveLength(1);
-    expect(issues[0]?.message).toBe('Path "missing.ts" does not exist.');
+    expect(issues[0]?.message).toBe('Path "Dockerfile" does not exist.');
   });
 
   it("reports only the planted broken path among slash alternatives in prose", () => {
@@ -74,6 +74,16 @@ describe("built-in checks", () => {
     const issues = runChecks({ root, files: [file] }).filter((issue) => issue.ruleId === "stale-path");
     expect(issues).toHaveLength(1);
     expect(issues[0]?.message).toContain('Path "src/missing.ts" does not exist.');
+  });
+
+  it("skips real-world prose and generated-path false positives", () => {
+    const root = path.join(fixtures, "realworld-repo");
+    const filePath = path.join(root, "AGENTS.md");
+    const content = readFileSync(filePath, "utf8");
+    const file: ParsedRulesFile = {
+      path: filePath, type: "agents", ...parseRules(content, { root, filePath }), content,
+    };
+    expect(runChecks({ root, files: [file] }).filter((issue) => issue.ruleId === "stale-path")).toEqual([]);
   });
 
   it("estimates token cost, reports the largest section, and totals root files", () => {

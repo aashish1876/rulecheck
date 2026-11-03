@@ -38,4 +38,13 @@ describe("parseRules", () => {
       expect(values).toContain(retained);
     }
   });
+
+  it("rejects dotted identifiers and non-allowlisted extensions, while extracting imports", () => {
+    const parsed = parseRules("`console.log` `it.skip` `nodes.value.push` `excalidraw.com` `3.11` `0.2.1` `@AGENTS.md` `@scope/name`");
+    const values = parsed.filePaths.map((reference) => reference.value);
+    for (const omitted of ["console.log", "it.skip", "nodes.value.push", "excalidraw.com", "3.11", "0.2.1", "@scope/name"]) {
+      expect(values).not.toContain(omitted);
+    }
+    expect(parsed.filePaths).toContainEqual(expect.objectContaining({ value: "AGENTS.md", isImport: true }));
+  });
 });

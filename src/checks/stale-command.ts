@@ -1,10 +1,23 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
+import fg from "fast-glob";
 import type { Check, Issue, ParsedRulesFile } from "../types.js";
+import { isBuildArtifactPath, isPlaceholder } from "./shared.js";
 
 interface PackageJson {
   scripts?: Record<string, string>;
 }
+
+interface RepoCommands {
+  scripts: Set<string>;
+  nearestScripts: Map<string, Set<string>>;
+  makeTargets: Set<string>;
+  canCheckMake: boolean;
+}
+
+const packageManagers = new Set(["npm", "pnpm", "yarn", "bun"]);
+const skipFlags = new Set(["--filter", "-F", "--workspace", "-w", "--prefix", "-C", "--cwd", "--dir", "-r", "--recursive"]);
+const scriptExtensions = new Set(["js", "mjs", "cjs", "ts", "py", "sh", "bash", "rb", "pl"]);
 
 function ancestors(start: string, root: string): string[] {
   const result: string[] = [];
@@ -26,18 +39,53 @@ function readPackage(file: string): PackageJson | undefined {
   }
 }
 
-function nearestPackage(root: string, file: ParsedRulesFile): { dir: string; data: PackageJson } | undefined {
-  for (const dir of ancestors(path.dirname(file.path), root)) {
-    const packageFile = path.join(dir, "package.json");
-    if (existsSync(packageFile)) {
-      const data = readPackage(packageFile);
-      if (data) return { dir, data };
+function collectRepoCommands(root: string): RepoCommands {
+  const packageFiles = fg.sync("**/package.json", {
+    cwd: root, onlyFiles: true, dot: true, suppressErrors: true,
+    ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/build/**"],
+  });
+  const scripts = new Set<string>();
+  const nearestScripts = new Map<string, Set<string>>();
+  for (const relative of packageFiles) {
+    const absolute = path.resolve(root, relative);
+    const values = Object.keys(readPackage(absolute)?.scripts ?? {});
+    values.forEach((script) => scripts.add(script));
+    nearestScripts.set(path.dirname(absolute), new Set(values));
+  }
+
+  const makeFiles = fg.sync(["**/Makefile", "**/GNUmakefile", "**/*.mk"], {
+    cwd: root, onlyFiles: true, dot: true, suppressErrors: true,
+    ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/build/**"],
+  });
+  const makeTargets = new Set<string>();
+  let canCheckMake = true;
+  for (const relative of makeFiles) {
+    let source: string;
+    try {
+      source = readFileSync(path.resolve(root, relative), "utf8");
+    } catch {
+      continue;
+    }
+    if (/^\s*-?include\b/m.test(source)) canCheckMake = false;
+    for (const line of source.split("\n")) {
+      const targetPart = line.replace(/\s+#.*$/, "").match(/^\s*([^:=\s][^:]*)\s*:/)?.[1];
+      if (!targetPart) continue;
+      for (const target of targetPart.trim().split(/\s+/)) {
+        if (!target.includes("$(") && !target.includes("%")) makeTargets.add(target);
+      }
     }
   }
-  return undefined;
+  return { scripts, nearestScripts, makeTargets, canCheckMake };
 }
 
-function distance(left: string, right: string): number {
+function closestScript(name: string, scripts: string[]): string | undefined {
+  return scripts
+    .map((script) => ({ script, distance: editDistance(name, script) }))
+    .filter(({ distance }) => distance > 0)
+    .sort((a, b) => a.distance - b.distance || a.script.localeCompare(b.script))[0]?.script;
+}
+
+function editDistance(left: string, right: string): number {
   const row = Array.from({ length: right.length + 1 }, (_, index) => index);
   for (let i = 1; i <= left.length; i += 1) {
     let diagonal = row[0] ?? 0;
@@ -51,49 +99,40 @@ function distance(left: string, right: string): number {
   return row[right.length] ?? 0;
 }
 
-function closestScript(name: string, scripts: string[]): string | undefined {
-  return scripts
-    .map((script) => ({ script, distance: distance(name, script) }))
-    .filter(({ distance: score }) => score > 0)
-    .sort((a, b) => a.distance - b.distance || a.script.localeCompare(b.script))[0]?.script;
-}
-
 function commandIssue(file: ParsedRulesFile, line: number, message: string, suggestion?: string, severity: Issue["severity"] = "error"): Issue {
   return {
-    ruleId: "stale-command",
-    severity,
+    ruleId: "stale-command", severity,
     message: suggestion ? `${message}. Did you mean "${suggestion}"?` : message,
-    file: file.path,
-    line,
-    ...(suggestion ? { suggestion } : {}),
+    file: file.path, line, ...(suggestion ? { suggestion } : {}),
   };
 }
 
-function verifyPackageManager(root: string, file: ParsedRulesFile, value: string, line: number, issues: Issue[]): boolean {
+function skippedCommand(value: string): boolean {
+  const parts = value.trim().split(/\s+/);
+  return parts.some((part) => skipFlags.has(part)) || /^cd\s+.+?\s*&&\s*/.test(value.trim());
+}
+
+function verifyPackageManager(root: string, file: ParsedRulesFile, value: string, line: number, data: RepoCommands, issues: Issue[]): boolean {
   const parts = value.trim().split(/\s+/);
   const manager = parts[0];
-  if (!manager || !["npm", "pnpm", "yarn", "bun"].includes(manager)) return false;
-  let script: string | undefined;
-  if (parts[1] === "run" && parts[2]) script = parts[2];
-  else if (manager !== "npm" && parts[1] && !parts[1].startsWith("-")) script = parts[1];
-  else if (manager === "npm" && ["test", "start", "t"].includes(parts[1] ?? "")) script = parts[1] === "t" ? "test" : parts[1];
-  if (script?.startsWith("-")) return true;
-  if (!script) return true;
+  if (!manager || !packageManagers.has(manager)) return false;
 
-  const packageInfo = nearestPackage(root, file);
-  if (!packageInfo) return true;
-  const scripts = packageInfo.data.scripts ?? {};
-  if (!scripts[script]) {
-    const suggestion = closestScript(script, Object.keys(scripts));
-    issues.push(commandIssue(file, line, `Script "${script}" not found in package.json`, suggestion));
+  const isRun = parts[1] === "run" && Boolean(parts[2]);
+  const isNpmRunScript = manager === "npm" && parts[1] === "run-script" && Boolean(parts[2]);
+  if (!isRun && !isNpmRunScript) return true;
+  const script = parts[2];
+  if (!script || script.startsWith("-")) return true;
+  const nearbyPackage = ancestors(path.dirname(file.path), root)
+    .map((directory) => data.nearestScripts.get(directory))
+    .find((names) => names !== undefined);
+  if (!data.scripts.has(script)) {
+    const suggestions = [...(nearbyPackage ?? []), ...data.scripts];
+    issues.push(commandIssue(file, line, `Script "${script}" not found in package.json`, closestScript(script, [...new Set(suggestions)])));
   }
 
-  if (manager === "npm" && parts[1] === "run") {
+  if (manager === "npm" && isRun) {
     const managerFile = [
-      ["pnpm-lock.yaml", "pnpm"],
-      ["yarn.lock", "yarn"],
-      ["bun.lockb", "bun"],
-      ["bun.lock", "bun"],
+      ["pnpm-lock.yaml", "pnpm"], ["yarn.lock", "yarn"], ["bun.lockb", "bun"], ["bun.lock", "bun"],
     ].find(([lock]) => existsSync(path.join(root, lock ?? "")));
     if (managerFile && !existsSync(path.join(root, "package-lock.json"))) {
       issues.push(commandIssue(file, line, `This repository uses ${managerFile[1]}, but the rule uses npm.`, undefined, "warning"));
@@ -102,52 +141,63 @@ function verifyPackageManager(root: string, file: ParsedRulesFile, value: string
   return true;
 }
 
-function findMakefile(root: string, file: ParsedRulesFile): string | undefined {
-  for (const dir of ancestors(path.dirname(file.path), root)) {
-    const makefile = path.join(dir, "Makefile");
-    if (existsSync(makefile)) return makefile;
+function hasExactEntry(target: string, base: string): boolean {
+  const absolute = path.resolve(target);
+  const resolvedBase = path.resolve(base);
+  if (absolute !== resolvedBase && !absolute.startsWith(`${resolvedBase}${path.sep}`)) return false;
+  let current = resolvedBase;
+  for (const segment of path.relative(resolvedBase, absolute).split(path.sep).filter(Boolean)) {
+    try {
+      if (!readdirSync(current).includes(segment)) return false;
+    } catch {
+      return false;
+    }
+    current = path.join(current, segment);
   }
-  return undefined;
+  return existsSync(absolute);
 }
 
-function verifyCommand(root: string, file: ParsedRulesFile, value: string, line: number, issues: Issue[]): void {
-  if (verifyPackageManager(root, file, value, line, issues)) return;
+function verifyDirectScript(root: string, file: ParsedRulesFile, target: string, line: number, issues: Issue[]): void {
+  if (!target || target.endsWith("/") || isBuildArtifactPath(target) || isPlaceholder(target)) return;
+  const basename = path.posix.basename(target);
+  const extension = path.posix.extname(basename).slice(1).toLowerCase();
+  if (!scriptExtensions.has(extension)) return;
+  const bases = [root, path.dirname(file.path)];
+  if (bases.some((base) => hasExactEntry(path.resolve(base, target), base))) return;
+
+  const parent = path.posix.dirname(target);
+  if (parent === ".") return;
+  const parentExists = bases.some((base) => hasExactEntry(path.resolve(base, parent), base));
+  if (parentExists) issues.push(commandIssue(file, line, `Script file "${target}" does not exist`));
+}
+
+function verifyCommand(root: string, file: ParsedRulesFile, value: string, line: number, data: RepoCommands, issues: Issue[]): void {
+  if (skippedCommand(value)) return;
+  if (verifyPackageManager(root, file, value, line, data, issues)) return;
+
   const parts = value.trim().replace(/^\$\s*/, "").split(/\s+/);
   const executable = parts[0];
-  const target = parts[1];
-  if (executable === "make" && target) {
-    const makefile = findMakefile(root, file);
-    if (!makefile) return;
-    const source = readFileSync(makefile, "utf8");
-    if (!new RegExp(`^${target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:` , "m").test(source)) {
-      issues.push(commandIssue(file, line, `Make target "${target}" not found in Makefile`));
+  if (executable === "make" && parts[1]) {
+    if (data.canCheckMake && !data.makeTargets.has(parts[1])) {
+      issues.push(commandIssue(file, line, `Make target "${parts[1]}" not found in Makefile`));
     }
     return;
   }
-  if (["node", "python", "python3", "bash", "sh"].includes(executable ?? "") && target && !target.startsWith("-")) {
-    const targetPath = path.resolve(path.dirname(file.path), target);
-    const rootTarget = path.resolve(root, target);
-    if (!existsSync(targetPath) && !existsSync(rootTarget)) {
-      issues.push(commandIssue(file, line, `Script file "${target}" does not exist`));
-    }
+  if (["node", "python", "python3", "bash", "sh"].includes(executable ?? "")) {
+    verifyDirectScript(root, file, parts[1] ?? "", line, issues);
     return;
   }
-  if (executable?.startsWith("./")) {
-    const targetPath = path.resolve(path.dirname(file.path), executable);
-    const rootTarget = path.resolve(root, executable);
-    if (!existsSync(targetPath) && !existsSync(rootTarget)) {
-      issues.push(commandIssue(file, line, `Script file "${executable}" does not exist`));
-    }
-  }
+  if (executable?.startsWith("./")) verifyDirectScript(root, file, executable, line, issues);
 }
 
 export const staleCommandCheck: Check = {
   id: "stale-command",
   description: "Find known commands that reference missing scripts, targets, or files.",
   run: (ctx) => {
+    const data = collectRepoCommands(path.resolve(ctx.root));
     const issues: Issue[] = [];
     for (const file of ctx.files) {
-      for (const command of file.commands) verifyCommand(ctx.root, file, command.value, command.line, issues);
+      for (const command of file.commands) verifyCommand(ctx.root, file, command.value, command.line, data, issues);
     }
     const seen = new Set<string>();
     return issues.filter((issue) => {

@@ -1,6 +1,4 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
-import { existsSync } from "node:fs";
-import path from "node:path";
 import type { Root, RootContent, List, ListItem, PhrasingContent, Text } from "mdast";
 import type { ParsedRules, Reference, Rule } from "./types.js";
 
@@ -18,22 +16,18 @@ function listItemText(item: ListItem): string {
   return item.children.map((child) => textOf(child as RootContent)).filter(Boolean).join(" ").trim();
 }
 
-const pathPattern = /(?:\.\.\/|\.\/|~\/)?[\w@.-]+(?:\/[\w@.-]+)*\/?/g;
-const commandPattern = /^(?:npm|npx|pnpm|yarn|bun|node|python(?:3)?|pytest|make|cargo|go|git|uv)(?:\s|$)|^\.\/[^\s]+/;
-const shellCommandPattern = /^(?:(?:npm|npx|pnpm|yarn|bun|node|python(?:3)?|pytest|make|cargo|go|git|uv)\b.*|\.\/\S+.*)$/;
+const pathPattern = /(?:(?:\.\.\/|\.\/|~\/)+|@)?[\w@.*?{}<>$-]+(?:\/[\w@.*?{}<>$-]+)*\/?/g;
+const commandPrefix = "(?:cd\\s+.+?\\s*&&\\s*)?";
+const commandPattern = new RegExp(`^${commandPrefix}(?:npm|npx|pnpm|yarn|bun|node|python(?:3)?|pytest|make|cargo|go|git|uv)(?:\\s|$)|^${commandPrefix}\\./[^\\s]+`);
+const shellCommandPattern = new RegExp(`^${commandPrefix}(?:(?:npm|npx|pnpm|yarn|bun|node|python(?:3)?|pytest|make|cargo|go|git|uv)\\b.*|\\./\\S+.*)$`);
 const urlPattern = /^https?:\/\//i;
-const pathExtension = /(?:^|\/)[^/.][^/]*\.[A-Za-z0-9]{1,5}$/;
-const slashNonPaths = /^(?:and\/or|w\/o|i\/o|tcp\/ip|ci\/cd)$/i;
+const allowedPathExtensions = new Set("ts tsx js jsx mjs cjs json md mdx yml yaml toml py rs go java kt swift rb php c cc cpp h hpp cs sh bash sql html css scss vue svelte txt lock ini cfg xml gradle tf proto ipynb env".split(" "));
+const pathExtension = /\.([A-Za-z0-9]+)$/;
 const numericRatio = /^\d+(?:[.-]\d+)*(?:\/\d+(?:[.-]\d+)*)+$/;
 const versionPair = /^v?\d+(?:\.\d+)+\/v?\d+(?:\.\d+)+$/i;
 const commonAbbreviation = /^(?:e\.g|i\.e|etc|vs)$/i;
 
-interface ParseOptions {
-  root?: string;
-  filePath?: string;
-}
-
-export function parseRules(markdown: string, options: ParseOptions = {}): ParsedRules {
+export function parseRules(markdown: string, _options: { root?: string; filePath?: string } = {}): ParsedRules {
   const tree = fromMarkdown(markdown) as Root;
   const headings: ParsedRules["headings"] = [];
   const rules: Rule[] = [];
@@ -42,26 +36,19 @@ export function parseRules(markdown: string, options: ParseOptions = {}): Parsed
   let currentHeading: string | null = null;
   const addPath = (value: string, line: number, inCode: boolean): void => {
     if (!value || /\s/.test(value) || value.startsWith("//") || value.includes(":") || urlPattern.test(value)) return;
-    if (slashNonPaths.test(value) || numericRatio.test(value) || versionPair.test(value) || commonAbbreviation.test(value)) return;
-    const hasSlash = value.includes("/");
-    const hasExtension = pathExtension.test(value);
-    const hasTrailingSlash = value.endsWith("/");
-    const explicitRelative = /^(?:\.\/|\.\.\/|~\/)/.test(value);
-    if (!hasExtension && !hasTrailingSlash && !explicitRelative) {
-      if (!inCode || !hasSlash || !options.root) return;
-      const first = value.split("/")[0];
-      if (!first) return;
-      const roots = [options.root, options.filePath ? path.dirname(options.filePath) : undefined].filter((item): item is string => Boolean(item));
-      if (!roots.some((root) => existsSync(path.resolve(root, first)))) return;
-    }
-    if (!filePaths.some((ref) => ref.value === value && ref.line === line)) filePaths.push({ value, line });
+    if (numericRatio.test(value) || versionPair.test(value) || commonAbbreviation.test(value)) return;
+    const isImport = value.startsWith("@") && !value.startsWith("@/");
+    if (isImport) value = value.slice(1);
+    const lastSegment = value.replace(/\/$/, "").split("/").at(-1) ?? "";
+    const extension = pathExtension.exec(lastSegment)?.[1]?.toLowerCase();
+    if (!value.endsWith("/") && (!extension || !allowedPathExtensions.has(extension))) return;
+    if (!filePaths.some((ref) => ref.value === value && ref.line === line)) filePaths.push({ value, line, ...(isImport ? { isImport: true } : {}) });
   };
 
   const scanText = (value: string, line: number, inCode = false): void => {
     const withoutUrls = value.replace(/https?:\/\/\S+/gi, " ");
     for (const match of withoutUrls.matchAll(pathPattern)) {
       const candidate = match[0].replace(/[.,;:!?]+$/, "");
-      if (/^[A-Z][a-z]+\.[A-Za-z]+$/.test(candidate)) continue;
       if (candidate) addPath(candidate, line, inCode);
     }
   };

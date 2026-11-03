@@ -11,7 +11,7 @@
 - Run `node scripts/check.js`.
 - Run `python scripts/check.py` and `python3 scripts/check.py`.
 - Run `bash scripts/check.sh` and `sh scripts/check.sh`.
-- Run `./scripts/check.sh`.
+- Execute the validation entrypoint directly with `./scripts/check.sh`.
 - Search with `docs/**/*.md`.
 - Create `src/generated/` during the build.
 - The documentation URL is https://example.com/guide.
