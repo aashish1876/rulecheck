@@ -71,7 +71,7 @@ function printText(
   const ruleCount = files.reduce((sum, file) => sum + file.rules.length, 0);
   const pathCount = files.reduce((sum, file) => sum + file.filePaths.length, 0);
   const commandCount = files.reduce((sum, file) => sum + file.commands.length, 0);
-  console.log(colorize(enabledColor, pc.dim, `\nFound ${files.length} rules files. ${ruleCount} rules, ${pathCount} path references, ${commandCount} commands.`));
+  console.log(colorize(enabledColor, pc.dim, `\nFound ${files.length} rules file${files.length === 1 ? "" : "s"}. ${ruleCount} rules, ${pathCount} path references, ${commandCount} commands.`));
 
   const visibleIssues = issues.filter((issue) => options.verbose || issue.severity !== "info");
   const grouped = new Map<string, Issue[]>();
