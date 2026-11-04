@@ -1,6 +1,6 @@
 {
   "name": "rulecheck",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Lint your AGENTS.md / CLAUDE.md / .cursorrules: catch stale paths, broken commands, duplicates, and conflicting rules.",
   "type": "module",
   "bin": {
