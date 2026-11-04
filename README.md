@@ -8,7 +8,7 @@ npx rulecheck
 
 Your agent reads your rules file on every request. If the file says "components live in `src/old/components/`" and that folder moved six months ago, the agent wastes time or edits the wrong place. Rules files rot, and nothing checks them. Until now.
 
-<!-- Add demo GIF here: ![rulecheck demo](./docs/demo.gif) -->
+![rulecheck demo](./docs/demo.gif)
 
 ## Example
 
